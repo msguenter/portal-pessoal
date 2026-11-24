@@ -50,7 +50,9 @@ export default function SaudePage() {
       .select("*")
       .order("data", { ascending: false });
 
-    if (!error && data) {
+    if (error) {
+      setMensagem(`Erro Supabase: ${error.message}`);
+    } else if (data) {
       setRegistros(data);
       preencherFormularioPorData(hojeISO, data);
     }
@@ -168,7 +170,7 @@ export default function SaudePage() {
   }, [pontosPeso]);
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Controle de Saúde</h1>
         <p className="text-sm text-slate-500">
