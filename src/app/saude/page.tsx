@@ -12,6 +12,7 @@ import {
   Check,
   Edit3,
   Save,
+  Trophy,
 } from "lucide-react";
 
 interface SaudeRegistro {
@@ -25,6 +26,11 @@ interface SaudeRegistro {
   consumiu_acucar: boolean;
   observacoes: string | null;
 }
+
+const MESES_PT = [
+  "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+  "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+];
 
 export default function SaudePage() {
   const [registros, setRegistros] = useState<SaudeRegistro[]>([]);
@@ -125,10 +131,26 @@ export default function SaudePage() {
     const comPressao = registros.filter((r) => r.sistole !== null && r.diastole !== null);
     const ultimaPressao = comPressao.length > 0 ? comPressao[0] : null;
 
+    // Sequência atual sem açúcar (do registo mais recente para trás)
     let streakSemAcucar = 0;
     for (const r of registros) {
       if (!r.consumiu_acucar) streakSemAcucar++;
       else break;
+    }
+
+    // Maior sequência histórica sem açúcar (ordem cronológica)
+    let maiorStreakSemAcucar = 0;
+    let contadorAtual = 0;
+    const cronologico = registros.slice().reverse();
+    for (const r of cronologico) {
+      if (!r.consumiu_acucar) {
+        contadorAtual++;
+        if (contadorAtual > maiorStreakSemAcucar) {
+          maiorStreakSemAcucar = contadorAtual;
+        }
+      } else {
+        contadorAtual = 0;
+      }
     }
 
     const ultimos30 = registros.slice(0, 30);
@@ -136,7 +158,14 @@ export default function SaudePage() {
       (r) => r.exercicio_cardio || r.exercicio_forca
     ).length;
 
-    return { pesoAtual, diffPeso, ultimaPressao, streakSemAcucar, treinos30d };
+    return {
+      pesoAtual,
+      diffPeso,
+      ultimaPressao,
+      streakSemAcucar,
+      maiorStreakSemAcucar,
+      treinos30d,
+    };
   }, [registros]);
 
   const pontosPeso = useMemo(() => {
@@ -150,9 +179,10 @@ export default function SaudePage() {
   const graficoSvg = useMemo(() => {
     if (pontosPeso.length < 2) return null;
     const largura = 760;
-    const altura = 200;
-    const padX = 40;
-    const padY = 24;
+    const altura = 225;
+    const padX = 42;
+    const padTop = 22;
+    const padBottom = 34;
 
     const pesos = pontosPeso.map((p) => p.peso);
     const minP = Math.floor(Math.min(...pesos) - 0.5);
@@ -161,12 +191,42 @@ export default function SaudePage() {
 
     const coords = pontosPeso.map((p, idx) => {
       const x = padX + (idx / (pontosPeso.length - 1)) * (largura - padX * 2);
-      const y = altura - padY - ((p.peso - minP) / rangeP) * (altura - padY * 2);
+      const y =
+        altura -
+        padBottom -
+        ((p.peso - minP) / rangeP) * (altura - padTop - padBottom);
       return { ...p, x, y };
     });
 
+    // Marcar a primeira ocorrência de cada mês no eixo X
+    const mesesLabels: { x: number; label: string }[] = [];
+    let ultimoMesAno = "";
+    coords.forEach((c) => {
+      const [ano, mesStr] = c.data.split("-");
+      const chave = `${ano}-${mesStr}`;
+      if (chave !== ultimoMesAno) {
+        ultimoMesAno = chave;
+        const mesIdx = parseInt(mesStr, 10) - 1;
+        mesesLabels.push({
+          x: c.x,
+          label: `${MESES_PT[mesIdx]}/${ano.slice(2)}`,
+        });
+      }
+    });
+
     const polyline = coords.map((c) => `${c.x},${c.y}`).join(" ");
-    return { largura, altura, minP, maxP, coords, polyline };
+    return {
+      largura,
+      altura,
+      padX,
+      padTop,
+      padBottom,
+      minP,
+      maxP,
+      coords,
+      polyline,
+      mesesLabels,
+    };
   }, [pontosPeso]);
 
   return (
@@ -178,14 +238,15 @@ export default function SaudePage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-sm">
+      {/* Cards de Resumo */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 text-xs sm:text-sm">
             <span>Peso Atual</span>
-            <Scale className="w-4 h-4 text-blue-600" />
+            <Scale className="w-4 h-4 text-blue-600 shrink-0" />
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900">
+          <div className="mt-2 flex flex-wrap items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-bold text-slate-900">
               {kpis.pesoAtual !== null ? `${kpis.pesoAtual.toFixed(1)} kg` : "—"}
             </span>
             {kpis.diffPeso !== null && (
@@ -202,13 +263,13 @@ export default function SaudePage() {
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-sm">
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 text-xs sm:text-sm">
             <span>Última Pressão</span>
-            <HeartPulse className="w-4 h-4 text-rose-600" />
+            <HeartPulse className="w-4 h-4 text-rose-600 shrink-0" />
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900">
+          <div className="mt-2 flex flex-wrap items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-bold text-slate-900">
               {kpis.ultimaPressao
                 ? `${kpis.ultimaPressao.sistole}/${kpis.ultimaPressao.diastole}`
                 : "—"}
@@ -231,34 +292,39 @@ export default function SaudePage() {
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-sm">
-            <span>Sequência Sem Açúcar</span>
-            <CandyOff className="w-4 h-4 text-emerald-600" />
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 text-xs sm:text-sm">
+            <span>Sem Açúcar</span>
+            <CandyOff className="w-4 h-4 text-emerald-600 shrink-0" />
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900">
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-bold text-slate-900">
               {kpis.streakSemAcucar} {kpis.streakSemAcucar === 1 ? "dia" : "dias"}
-            </span>
+            </div>
+            <div className="flex items-center gap-1 mt-1 text-xs text-amber-700 font-medium">
+              <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span>Recorde: {kpis.maiorStreakSemAcucar} dias</span>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 text-sm">
-            <span>Treinos (30 dias)</span>
-            <Dumbbell className="w-4 h-4 text-indigo-600" />
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 text-xs sm:text-sm">
+            <span>Treinos (30d)</span>
+            <Dumbbell className="w-4 h-4 text-indigo-600 shrink-0" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900">
+            <span className="text-xl sm:text-2xl font-bold text-slate-900">
               {kpis.treinos30d} dias
             </span>
           </div>
         </div>
       </div>
 
+      {/* Formulário de Check-in Diário */}
       <form
         onSubmit={handleSalvar}
-        className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4"
+        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-slate-800">
@@ -271,7 +337,7 @@ export default function SaudePage() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
               Data
@@ -281,7 +347,7 @@ export default function SaudePage() {
               required
               value={dataForm}
               onChange={(e) => preencherFormularioPorData(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900"
             />
           </div>
 
@@ -295,7 +361,7 @@ export default function SaudePage() {
               placeholder="Ex: 108.0"
               value={pesoForm}
               onChange={(e) => setPesoForm(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900"
             />
           </div>
 
@@ -308,7 +374,7 @@ export default function SaudePage() {
               placeholder="Ex: 120"
               value={sistoleForm}
               onChange={(e) => setSistoleForm(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900"
             />
           </div>
 
@@ -321,16 +387,16 @@ export default function SaudePage() {
               placeholder="Ex: 76"
               value={diastoleForm}
               onChange={(e) => setDiastoleForm(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900"
             />
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-2.5 pt-1">
           <button
             type="button"
             onClick={() => setCardioForm(!cardioForm)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium border transition ${
               cardioForm
                 ? "bg-blue-600 text-white border-blue-600"
                 : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
@@ -343,7 +409,7 @@ export default function SaudePage() {
           <button
             type="button"
             onClick={() => setForcaForm(!forcaForm)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium border transition ${
               forcaForm
                 ? "bg-indigo-600 text-white border-indigo-600"
                 : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
@@ -356,7 +422,7 @@ export default function SaudePage() {
           <button
             type="button"
             onClick={() => setAcucarForm(!acucarForm)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium border transition ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium border transition ${
               acucarForm
                 ? "bg-rose-600 text-white border-rose-600"
                 : "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
@@ -371,13 +437,13 @@ export default function SaudePage() {
             placeholder="Observação opcional..."
             value={obsForm}
             onChange={(e) => setObsForm(e.target.value)}
-            className="flex-1 min-w-[200px] rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
+            className="flex-1 min-w-[200px] rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-900"
           />
 
           <button
             type="submit"
             disabled={saving}
-            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
             {saving ? "A guardar..." : "Guardar"}
@@ -385,8 +451,9 @@ export default function SaudePage() {
         </div>
       </form>
 
+      {/* Gráfico de Evolução de Peso com Eixo de Meses */}
       {graficoSvg && (
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-semibold text-slate-800">
               Evolução do Peso (kg)
@@ -398,30 +465,61 @@ export default function SaudePage() {
           <div className="w-full overflow-x-auto">
             <svg
               viewBox={`0 0 ${graficoSvg.largura} ${graficoSvg.altura}`}
-              className="w-full h-52"
+              className="w-full min-w-[520px] h-56"
             >
+              {/* Linhas horizontais de referência */}
               <line
-                x1="40"
-                y1="24"
-                x2={graficoSvg.largura - 40}
-                y2="24"
+                x1={graficoSvg.padX}
+                y1={graficoSvg.padTop}
+                x2={graficoSvg.largura - graficoSvg.padX}
+                y2={graficoSvg.padTop}
                 stroke="#e2e8f0"
                 strokeDasharray="4"
               />
               <line
-                x1="40"
-                y1={graficoSvg.altura - 24}
-                x2={graficoSvg.largura - 40}
-                y2={graficoSvg.altura - 24}
-                stroke="#e2e8f0"
+                x1={graficoSvg.padX}
+                y1={graficoSvg.altura - graficoSvg.padBottom}
+                x2={graficoSvg.largura - graficoSvg.padX}
+                y2={graficoSvg.altura - graficoSvg.padBottom}
+                stroke="#cbd5e1"
               />
-              <text x="4" y="28" fontSize="11" fill="#64748b">
+
+              {/* Valores mínimo e máximo no eixo Y */}
+              <text x="6" y={graficoSvg.padTop + 4} fontSize="11" fill="#64748b">
                 {graficoSvg.maxP}
               </text>
-              <text x="4" y={graficoSvg.altura - 20} fontSize="11" fill="#64748b">
+              <text
+                x="6"
+                y={graficoSvg.altura - graficoSvg.padBottom + 4}
+                fontSize="11"
+                fill="#64748b"
+              >
                 {graficoSvg.minP}
               </text>
 
+              {/* Marcações verticais e rótulos dos meses no eixo X */}
+              {graficoSvg.mesesLabels.map((m, idx) => (
+                <g key={idx}>
+                  <line
+                    x1={m.x}
+                    y1={graficoSvg.padTop}
+                    x2={m.x}
+                    y2={graficoSvg.altura - graficoSvg.padBottom}
+                    stroke="#f1f5f9"
+                  />
+                  <text
+                    x={m.x}
+                    y={graficoSvg.altura - 12}
+                    textAnchor="middle"
+                    fontSize="11"
+                    fill="#64748b"
+                  >
+                    {m.label}
+                  </text>
+                </g>
+              ))}
+
+              {/* Linha de evolução */}
               <polyline
                 fill="none"
                 stroke="#2563eb"
@@ -429,10 +527,11 @@ export default function SaudePage() {
                 points={graficoSvg.polyline}
               />
 
+              {/* Pontos */}
               {graficoSvg.coords.map((c, i) => (
                 <g key={i}>
                   <circle cx={c.x} cy={c.y} r="3.5" fill="#1d4ed8">
-                    <title>{`${c.data}: ${c.peso.toFixed(1)} kg`}</title>
+                    <title>{`${c.data.split("-").reverse().join("/")}: ${c.peso.toFixed(1)} kg`}</title>
                   </circle>
                 </g>
               ))}
@@ -441,7 +540,8 @@ export default function SaudePage() {
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+      {/* Histórico Recente */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
           <h2 className="text-base font-semibold text-slate-800">
             Histórico Recente (Últimos 30 dias)
