@@ -1,11 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
-import { LayoutGrid, Wallet, HeartPulse, Plane, Target } from "lucide-react";
+import { LayoutGrid, Wallet, HeartPulse, Hammer, Target } from "lucide-react";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Portal Pessoal",
-  description: "Gestão pessoal de finanças, saúde, viagens e planos",
+  description: "Gestão pessoal de saúde, obra, finanças e planos",
 };
 
 export const viewport: Viewport = {
@@ -17,8 +17,8 @@ export const viewport: Viewport = {
 const navItems = [
   { href: "/", label: "Início", icon: LayoutGrid },
   { href: "/saude", label: "Saúde", icon: HeartPulse },
+  { href: "/obra", label: "Obra", icon: Hammer },
   { href: "/financas", label: "Finanças", icon: Wallet },
-  { href: "/viagens", label: "Viagens", icon: Plane },
   { href: "/planos", label: "Planos", icon: Target },
 ];
 
@@ -30,7 +30,6 @@ export default function RootLayout({
   return (
     <html lang="pt-PT">
       <body className="min-h-screen bg-slate-50 text-slate-900 pb-24 md:pb-8">
-        {/* Topo Desktop & Mobile */}
         <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200">
           <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
             <Link
@@ -43,7 +42,6 @@ export default function RootLayout({
               Portal Pessoal
             </Link>
 
-            {/* Menu Desktop */}
             <nav className="hidden md:flex items-center gap-1">
               {navItems.map((item) => {
                 const Icon = item.icon;
@@ -61,15 +59,13 @@ export default function RootLayout({
             </nav>
 
             <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
-              v0.2
+              v0.3
             </span>
           </div>
         </header>
 
-        {/* Conteúdo Principal */}
         <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
 
-        {/* Barra Inferior Fixa estilo App Mobile */}
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 px-2 py-1.5 shadow-lg">
           <div className="grid grid-cols-5 gap-1">
             {navItems.map((item) => {

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { HeartPulse, Wallet, Plane, Target, ChevronRight } from "lucide-react";
+import { HeartPulse, Hammer, Wallet, Target, ChevronRight } from "lucide-react";
 
 const modulos = [
   {
@@ -11,19 +11,19 @@ const modulos = [
     ativo: true,
   },
   {
+    href: "/obra",
+    titulo: "Obra & Apartamento",
+    descricao: "Fluxo de caixa, entradas, escritura e gastos da obra",
+    icon: Hammer,
+    cor: "bg-amber-50 text-amber-600 border-amber-100",
+    ativo: true,
+  },
+  {
     href: "/financas",
     titulo: "Finanças",
     descricao: "Orçamento mensal, despesas e investimentos",
     icon: Wallet,
     cor: "bg-emerald-50 text-emerald-600 border-emerald-100",
-    ativo: false,
-  },
-  {
-    href: "/viagens",
-    titulo: "Viagens",
-    descricao: "Roteiros, reservas e checklists de viagem",
-    icon: Plane,
-    cor: "bg-sky-50 text-sky-600 border-sky-100",
     ativo: false,
   },
   {
