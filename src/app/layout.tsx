@@ -3,8 +3,13 @@ import Link from "next/link";
 import { LayoutGrid, Wallet, HeartPulse, Hammer, Target } from "lucide-react";
 import "./globals.css";
 
+const isPreview =
+  process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ||
+  process.env.VERCEL_ENV === "preview" ||
+  process.env.NODE_ENV === "development";
+
 export const metadata: Metadata = {
-  title: "Portal Pessoal",
+  title: isPreview ? "[DEV] Portal Pessoal" : "Portal Pessoal",
   description: "Gestão pessoal de saúde, obra, finanças e planos",
 };
 
@@ -30,13 +35,23 @@ export default function RootLayout({
   return (
     <html lang="pt-PT">
       <body className="min-h-screen bg-slate-50 text-slate-900 pb-24 md:pb-8">
-        <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200">
+        <header
+          className={`sticky top-0 z-30 backdrop-blur border-b ${
+            isPreview
+              ? "bg-amber-50/95 border-amber-300"
+              : "bg-white/90 border-slate-200"
+          }`}
+        >
           <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
             <Link
               href="/"
               className="flex items-center gap-2 font-bold text-slate-900 text-lg tracking-tight"
             >
-              <span className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-sm">
+              <span
+                className={`w-8 h-8 rounded-lg text-white flex items-center justify-center text-sm ${
+                  isPreview ? "bg-amber-600" : "bg-slate-900"
+                }`}
+              >
                 PP
               </span>
               Portal Pessoal
@@ -58,9 +73,15 @@ export default function RootLayout({
               })}
             </nav>
 
-            <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
-              v0.3
-            </span>
+            {isPreview ? (
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500 text-white tracking-wide">
+                DEV • v0.3
+              </span>
+            ) : (
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+                v0.3
+              </span>
+            )}
           </div>
         </header>
 
