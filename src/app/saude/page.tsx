@@ -25,12 +25,59 @@ interface SaudeRegistro {
   exercicio_forca: boolean;
   consumiu_acucar: boolean;
   observacoes: string | null;
+  isDefault?: boolean;
 }
+
+const DATA_INICIO = "2026-05-18";
 
 const MESES_PT = [
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
   "Jul", "Ago", "Set", "Out", "Nov", "Dez",
 ];
+
+function gerarCalendarioCompleto(
+  registros: SaudeRegistro[],
+  dataInicioStr: string,
+  dataFimStr: string
+): SaudeRegistro[] {
+  const mapa = new Map<string, SaudeRegistro>();
+  for (const r of registros) {
+    mapa.set(r.data, r);
+  }
+
+  const [anoI, mesI, diaI] = dataInicioStr.split("-").map(Number);
+  const [anoF, mesF, diaF] = dataFimStr.split("-").map(Number);
+
+  const inicio = new Date(Date.UTC(anoI, mesI - 1, diaI));
+  const fim = new Date(Date.UTC(anoF, mesF - 1, diaF));
+  const dataLimite = fim >= inicio ? fim : inicio;
+
+  const resultado: SaudeRegistro[] = [];
+  for (
+    let d = new Date(dataLimite);
+    d >= inicio;
+    d.setUTCDate(d.getUTCDate() - 1)
+  ) {
+    const iso = d.toISOString().split("T")[0];
+    const existente = mapa.get(iso);
+    if (existente) {
+      resultado.push({ ...existente, isDefault: false });
+    } else {
+      resultado.push({
+        data: iso,
+        peso_kg: null,
+        sistole: null,
+        diastole: null,
+        exercicio_cardio: false,
+        exercicio_forca: false,
+        consumiu_acucar: false,
+        observacoes: null,
+        isDefault: true,
+      });
+    }
+  }
+  return resultado;
+}
 
 export default function SaudePage() {
   const [registros, setRegistros] = useState<SaudeRegistro[]>([]);
@@ -121,27 +168,41 @@ export default function SaudePage() {
     setSaving(false);
   }
 
-  const kpis = useMemo(() => {
-    const comPeso = registros.filter((r) => r.peso_kg !== null);
-    const pesoAtual = comPeso.length > 0 ? Number(comPeso[0].peso_kg) : null;
-    const pesoInicial = comPeso.length > 0 ? Number(comPeso[comPeso.length - 1].peso_kg) : null;
-    const diffPeso =
-      pesoAtual !== null && pesoInicial !== null ? +(pesoAtual - pesoInicial).toFixed(1) : null;
+  // Linha do tempo contínua desde 18/05/2026 até hoje (com defaults nos dias sem registo)
+  const calendarioCompleto = useMemo(() => {
+    const maiorData =
+      registros.length > 0 && registros[0].data > hojeISO
+        ? registros[0].data
+        : hojeISO;
+    return gerarCalendarioCompleto(registros, DATA_INICIO, maiorData);
+  }, [registros, hojeISO]);
 
-    const comPressao = registros.filter((r) => r.sistole !== null && r.diastole !== null);
+  const kpis = useMemo(() => {
+    const comPeso = calendarioCompleto.filter((r) => r.peso_kg !== null);
+    const pesoAtual = comPeso.length > 0 ? Number(comPeso[0].peso_kg) : null;
+    const pesoInicial =
+      comPeso.length > 0 ? Number(comPeso[comPeso.length - 1].peso_kg) : null;
+    const diffPeso =
+      pesoAtual !== null && pesoInicial !== null
+        ? +(pesoAtual - pesoInicial).toFixed(1)
+        : null;
+
+    const comPressao = calendarioCompleto.filter(
+      (r) => r.sistole !== null && r.diastole !== null
+    );
     const ultimaPressao = comPressao.length > 0 ? comPressao[0] : null;
 
-    // Sequência atual sem açúcar (do registo mais recente para trás)
+    // Sequência atual sem açúcar (do dia mais recente para trás, incluindo dias sem registo = false)
     let streakSemAcucar = 0;
-    for (const r of registros) {
+    for (const r of calendarioCompleto) {
       if (!r.consumiu_acucar) streakSemAcucar++;
       else break;
     }
 
-    // Maior sequência histórica sem açúcar (ordem cronológica)
+    // Maior sequência histórica sem açúcar (ordem cronológica contínua)
     let maiorStreakSemAcucar = 0;
     let contadorAtual = 0;
-    const cronologico = registros.slice().reverse();
+    const cronologico = calendarioCompleto.slice().reverse();
     for (const r of cronologico) {
       if (!r.consumiu_acucar) {
         contadorAtual++;
@@ -153,7 +214,7 @@ export default function SaudePage() {
       }
     }
 
-    const ultimos30 = registros.slice(0, 30);
+    const ultimos30 = calendarioCompleto.slice(0, 30);
     const treinos30d = ultimos30.filter(
       (r) => r.exercicio_cardio || r.exercicio_forca
     ).length;
@@ -166,15 +227,15 @@ export default function SaudePage() {
       maiorStreakSemAcucar,
       treinos30d,
     };
-  }, [registros]);
+  }, [calendarioCompleto]);
 
   const pontosPeso = useMemo(() => {
-    return registros
+    return calendarioCompleto
       .filter((r) => r.peso_kg !== null)
       .slice()
       .reverse()
       .map((r) => ({ data: r.data, peso: Number(r.peso_kg) }));
-  }, [registros]);
+  }, [calendarioCompleto]);
 
   const graficoSvg = useMemo(() => {
     if (pontosPeso.length < 2) return null;
@@ -198,7 +259,6 @@ export default function SaudePage() {
       return { ...p, x, y };
     });
 
-    // Marcar a primeira ocorrência de cada mês no eixo X
     const mesesLabels: { x: number; label: string }[] = [];
     let ultimoMesAno = "";
     coords.forEach((c) => {
@@ -467,7 +527,6 @@ export default function SaudePage() {
               viewBox={`0 0 ${graficoSvg.largura} ${graficoSvg.altura}`}
               className="w-full min-w-[520px] h-56"
             >
-              {/* Linhas horizontais de referência */}
               <line
                 x1={graficoSvg.padX}
                 y1={graficoSvg.padTop}
@@ -484,7 +543,6 @@ export default function SaudePage() {
                 stroke="#cbd5e1"
               />
 
-              {/* Valores mínimo e máximo no eixo Y */}
               <text x="6" y={graficoSvg.padTop + 4} fontSize="11" fill="#64748b">
                 {graficoSvg.maxP}
               </text>
@@ -497,7 +555,6 @@ export default function SaudePage() {
                 {graficoSvg.minP}
               </text>
 
-              {/* Marcações verticais e rótulos dos meses no eixo X */}
               {graficoSvg.mesesLabels.map((m, idx) => (
                 <g key={idx}>
                   <line
@@ -519,7 +576,6 @@ export default function SaudePage() {
                 </g>
               ))}
 
-              {/* Linha de evolução */}
               <polyline
                 fill="none"
                 stroke="#2563eb"
@@ -527,7 +583,6 @@ export default function SaudePage() {
                 points={graficoSvg.polyline}
               />
 
-              {/* Pontos */}
               {graficoSvg.coords.map((c, i) => (
                 <g key={i}>
                   <circle cx={c.x} cy={c.y} r="3.5" fill="#1d4ed8">
@@ -540,7 +595,7 @@ export default function SaudePage() {
         </div>
       )}
 
-      {/* Histórico Recente */}
+      {/* Histórico Recente (Últimos 30 dias corridos) */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
           <h2 className="text-base font-semibold text-slate-800">
@@ -562,10 +617,18 @@ export default function SaudePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {registros.slice(0, 30).map((r) => (
-                <tr key={r.data} className="hover:bg-slate-50">
+              {calendarioCompleto.slice(0, 30).map((r) => (
+                <tr
+                  key={r.data}
+                  className={r.isDefault ? "bg-slate-50/40 hover:bg-slate-50" : "hover:bg-slate-50"}
+                >
                   <td className="px-4 py-2.5 font-medium text-slate-800">
-                    {r.data.split("-").reverse().join("/")}
+                    <span>{r.data.split("-").reverse().join("/")}</span>
+                    {r.isDefault && (
+                      <span className="ml-2 text-[10px] text-slate-400 font-normal">
+                        (padrão)
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-slate-700">
                     {r.peso_kg !== null ? `${Number(r.peso_kg).toFixed(1)} kg` : "—"}
