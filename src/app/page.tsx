@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { HeartPulse, Hammer, Wallet, Target, ChevronRight } from "lucide-react";
+import {
+  HeartPulse,
+  Hammer,
+  TrendingUp,
+  Wallet,
+  Target,
+  ChevronRight,
+} from "lucide-react";
 
 const modulos = [
   {
@@ -19,11 +26,19 @@ const modulos = [
     ativo: true,
   },
   {
+    href: "/investimentos-br",
+    titulo: "Investimentos Brasil",
+    descricao: "Carteira ativa, patrimônio líquido e cotas de terceiros",
+    icon: TrendingUp,
+    cor: "bg-emerald-50 text-emerald-600 border-emerald-100",
+    ativo: true,
+  },
+  {
     href: "/financas",
     titulo: "Finanças",
-    descricao: "Orçamento mensal, despesas e investimentos",
+    descricao: "Orçamento mensal, despesas e controle geral",
     icon: Wallet,
-    cor: "bg-emerald-50 text-emerald-600 border-emerald-100",
+    cor: "bg-sky-50 text-sky-600 border-sky-100",
     ativo: false,
   },
   {
