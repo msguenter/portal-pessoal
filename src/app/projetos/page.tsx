@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { parseProjetoExcel } from '@/lib/projetos/parseExcel';
 import ProjetosCharts from '@/components/projetos/ProjetosCharts';
+import ProjetosGlobalGantt from '@/components/projetos/ProjetosGlobalGantt';
 import {
   APROVACOES_PADRAO,
   COM_QUEM_ESTA_OPCOES,
@@ -49,6 +50,7 @@ type ProjetoRow = {
   entrega_fase_atual?: string | null;
   registos_count?: number;
   pendentes_count?: number;
+  projeto_prazos?: any[];
   projeto_especialidades?: any[];
 };
 
@@ -573,9 +575,12 @@ export default function ProjetosPage() {
         </div>
       </div>
 
-      {/* Painel Recolhível: Gráficos & KPIs */}
+      {/* Painel Recolhível: Gráficos, KPIs & Gantt Global */}
       {chartsOpen && !loading && (
-        <ProjetosCharts projetos={projetos} equipa={equipa} />
+        <div className="space-y-4">
+          <ProjetosCharts projetos={projetos} equipa={equipa} />
+          <ProjetosGlobalGantt projetos={filteredProjetos} />
+        </div>
       )}
 
       {/* Painel Recolhível: Filtros */}
