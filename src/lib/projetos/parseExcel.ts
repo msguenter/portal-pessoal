@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { APROVACOES_PADRAO, calcularDataEntregaFase } from './constants';
 
 export interface ParsedProjeto {
   projeto: {
@@ -16,6 +17,8 @@ export interface ParsedProjeto {
     requerente_telemovel: string;
     requerente_email: string;
     fase_atual: string;
+    estado: string;
+    com_quem_esta: string[];
   };
   prazos: Array<{
     ordem: number;
@@ -23,16 +26,25 @@ export interface ParsedProjeto {
     data_inicio: string | null;
     data_fim: string | null;
     prazo_contrato_dias: number | null;
+    prorrogacao_dias: number;
     prazo_real_dias: number | null;
   }>;
   especialidades: Array<{
     ordem: number;
     especialidade: string;
+    aplicavel: boolean;
+    estado: string;
     tecnico_elaborou: string;
     data_inicio: string | null;
     data_fim: string | null;
     tecnico_responsavel: string;
     notas: string;
+  }>;
+  aprovacoes: Array<{
+    ordem: number;
+    nome: string;
+    aplicavel: boolean;
+    estado: string;
   }>;
   registos: Array<{
     ref: string;
@@ -57,11 +69,11 @@ export interface ParsedProjeto {
 function excelDateToISO(val: unknown): string | null {
   if (!val) return null;
   if (val instanceof Date && !isNaN(val.getTime())) {
-    if (val.getFullYear() <= 1901) return null; // Ignora datas de fórmula vazia (=D25+I25 -> 1900-02-28)
+    if (val.getFullYear() <= 1901) return null;
     return val.toISOString().split('T')[0];
   }
   if (typeof val === 'number') {
-    if (val < 100) return null; // Serial < 100 corresponde a 1900
+    if (val < 100) return null;
     const parsed = XLSX.SSF.parse_date_code(val);
     if (!parsed || parsed.y <= 1901) return null;
     const m = String(parsed.m).padStart(2, '0');
@@ -84,6 +96,16 @@ function cellStr(ws: XLSX.WorkSheet, addr: string): string {
   return String(cell.v).trim();
 }
 
+function normalizarNomeFase(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes('levantamento')) return 'Levantamento';
+  if (lower.includes('estudo')) return 'Estudo Prévio';
+  if (lower.includes('anteprojecto') || lower.includes('anteprojeto')) return 'Anteprojeto';
+  if (lower.includes('execução') || lower.includes('execucao')) return 'Projeto de Execução';
+  if (lower.includes('assistência') || lower.includes('assistencia')) return 'Assistência Técnica';
+  return raw;
+}
+
 export async function parseProjetoExcel(file: File): Promise<ParsedProjeto> {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
@@ -99,12 +121,14 @@ export async function parseProjetoExcel(file: File): Promise<ParsedProjeto> {
   const prazos = [];
   let faseAtual = 'Levantamento';
   for (let r = 23; r <= 27; r++) {
-    const fase = cellStr(wsCapa, `A${r}`);
-    if (!fase) continue;
+    const rawFase = cellStr(wsCapa, `A${r}`);
+    if (!rawFase) continue;
+    const fase = normalizarNomeFase(rawFase);
     const dInicio = excelDateToISO(wsCapa[`D${r}`]?.v);
-    const dFim = excelDateToISO(wsCapa[`F${r}`]?.v);
+    const dFimRaw = excelDateToISO(wsCapa[`F${r}`]?.v);
     const pContrato = Number(wsCapa[`I${r}`]?.v) || null;
     const pReal = Number(wsCapa[`K${r}`]?.v) || null;
+    const dFim = calcularDataEntregaFase(dInicio, dFimRaw, pContrato, 0);
 
     if (dInicio) faseAtual = fase;
 
@@ -114,6 +138,7 @@ export async function parseProjetoExcel(file: File): Promise<ParsedProjeto> {
       data_inicio: dInicio,
       data_fim: dFim,
       prazo_contrato_dias: pContrato,
+      prorrogacao_dias: 0,
       prazo_real_dias: pReal,
     });
   }
@@ -123,9 +148,12 @@ export async function parseProjetoExcel(file: File): Promise<ParsedProjeto> {
   for (let r = 32; r <= 47; r++) {
     const esp = cellStr(wsCapa, `A${r}`);
     if (!esp) continue;
+    const isGasOpcional = esp.toLowerCase().includes('gás');
     especialidades.push({
       ordem: r - 31,
       especialidade: esp,
+      aplicavel: !isGasOpcional,
+      estado: 'Pendente',
       tecnico_elaborou: cellStr(wsCapa, `D${r}`),
       data_inicio: excelDateToISO(wsCapa[`F${r}`]?.v),
       data_fim: excelDateToISO(wsCapa[`G${r}`]?.v),
@@ -134,7 +162,15 @@ export async function parseProjetoExcel(file: File): Promise<ParsedProjeto> {
     });
   }
 
-  // 3. Registos (Aba Registos a partir da linha 5)
+  // 3. Aprovações padrão (Base 05)
+  const aprovacoes = APROVACOES_PADRAO.map((nome, idx) => ({
+    ordem: idx + 1,
+    nome,
+    aplicavel: false,
+    estado: 'Pendente',
+  }));
+
+  // 4. Registos (Aba Registos a partir da linha 5)
   const range = XLSX.utils.decode_range(wsRegistos['!ref'] || 'A1:Q50');
   const registos = [];
   for (let r = 5; r <= range.e.r + 1; r++) {
@@ -163,6 +199,20 @@ export async function parseProjetoExcel(file: File): Promise<ParsedProjeto> {
     });
   }
 
+  // Inferir estado e "com quem está" a partir dos registos abertos
+  const abertosComDO = registos.filter((r) => !r.data_resolucao && r.atribuido_a?.toUpperCase() === 'DO');
+  const dataInicioContrato = excelDateToISO(wsCapa['K6']?.v);
+  const dataFimContrato = excelDateToISO(wsCapa['L6']?.v);
+
+  let estado = 'Não iniciada';
+  if (dataFimContrato) estado = 'Concluído';
+  else if (abertosComDO.length > 0) estado = 'Aguarda resposta DO';
+  else if (dataInicioContrato) estado = 'Em andamento';
+
+  const comQuemEsta: string[] = [];
+  if (estado === 'Em andamento') comQuemEsta.push('ARCOS');
+  if (abertosComDO.length > 0) comQuemEsta.push('Dono de Obra');
+
   return {
     projeto: {
       codigo: cellStr(wsCapa, 'A6'),
@@ -170,8 +220,8 @@ export async function parseProjetoExcel(file: File): Promise<ParsedProjeto> {
       designacao: cellStr(wsCapa, 'B17') || cellStr(wsCapa, 'C6'),
       morada: cellStr(wsCapa, 'B18'),
       num_processo: cellStr(wsCapa, 'B19'),
-      data_inicio: excelDateToISO(wsCapa['K6']?.v),
-      data_fim: excelDateToISO(wsCapa['L6']?.v),
+      data_inicio: dataInicioContrato,
+      data_fim: dataFimContrato,
       requerente_nome: cellStr(wsCapa, 'B11'),
       requerente_sede: cellStr(wsCapa, 'B12'),
       requerente_nif: cellStr(wsCapa, 'B13'),
@@ -179,9 +229,12 @@ export async function parseProjetoExcel(file: File): Promise<ParsedProjeto> {
       requerente_telemovel: cellStr(wsCapa, 'E14'),
       requerente_email: cellStr(wsCapa, 'H14'),
       fase_atual: faseAtual,
+      estado,
+      com_quem_esta: comQuemEsta,
     },
     prazos,
     especialidades,
+    aprovacoes,
     registos,
   };
 }

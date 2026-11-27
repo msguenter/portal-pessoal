@@ -4,6 +4,12 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import {
+  COM_QUEM_ESTA_OPCOES,
+  ESTADOS_PROJETO,
+  FASES_PADRAO,
+  calcularDataEntregaFase,
+} from '@/lib/projetos/constants';
 
 export default function ProjetoDetalhePage() {
   const { id } = useParams<{ id: string }>();
@@ -11,14 +17,14 @@ export default function ProjetoDetalhePage() {
   const [projeto, setProjeto] = useState<any>(null);
   const [prazos, setPrazos] = useState<any[]>([]);
   const [especialidades, setEspecialidades] = useState<any[]>([]);
+  const [aprovacoes, setAprovacoes] = useState<any[]>([]);
   const [registos, setRegistos] = useState<any[]>([]);
-  const [tab, setTab] = useState<'registos' | 'capa' | 'especialidades'>('registos');
+  const [tab, setTab] = useState<'registos' | 'bases' | 'trabalhos' | 'aprovacoes'>('registos');
 
-  // Filtro de comunicações
   const [onlyOpen, setOnlyOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [savingBase, setSavingBase] = useState(false);
 
-  // Novo registo
   const [form, setForm] = useState({
     ref: '',
     levantado_por: 'EP',
@@ -35,19 +41,112 @@ export default function ProjetoDetalhePage() {
   }, [id]);
 
   async function loadAll() {
-    const [{ data: p }, { data: pr }, { data: esp }, { data: reg }] = await Promise.all([
+    const [{ data: p }, { data: pr }, { data: esp }, { data: aprov }, { data: reg }] = await Promise.all([
       supabase.from('projetos').select('*').eq('id', id).single(),
       supabase.from('projeto_prazos').select('*').eq('projeto_id', id).order('ordem'),
       supabase.from('projeto_especialidades').select('*').eq('projeto_id', id).order('ordem'),
+      supabase.from('projeto_aprovacoes').select('*').eq('projeto_id', id).order('ordem'),
       supabase.from('projeto_registos').select('*').eq('projeto_id', id).order('data_registo', { ascending: false }),
     ]);
 
-    setProjeto(p);
+    if (p) {
+      setProjeto({
+        ...p,
+        com_quem_esta: Array.isArray(p.com_quem_esta) ? p.com_quem_esta : [],
+      });
+    }
     setPrazos(pr || []);
     setEspecialidades(esp || []);
+    setAprovacoes(aprov || []);
     setRegistos(reg || []);
   }
 
+  // Guardar alterações das Bases 01 e 02
+  async function handleSaveIdentificacao(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingBase(true);
+    await supabase
+      .from('projetos')
+      .update({
+        designacao: projeto.designacao,
+        coordenador: projeto.coordenador,
+        morada: projeto.morada,
+        num_processo: projeto.num_processo,
+        data_inicio: projeto.data_inicio || null,
+        data_fim: projeto.data_fim || null,
+        fase_atual: projeto.fase_atual,
+        estado: projeto.estado,
+        com_quem_esta: projeto.com_quem_esta,
+        requerente_nome: projeto.requerente_nome,
+        requerente_sede: projeto.requerente_sede,
+        requerente_nif: projeto.requerente_nif,
+        requerente_responsavel: projeto.requerente_responsavel,
+        requerente_telemovel: projeto.requerente_telemovel,
+        requerente_email: projeto.requerente_email,
+      })
+      .eq('id', id);
+
+    if (projeto.requerente_id) {
+      await supabase
+        .from('requerentes')
+        .update({
+          nome: projeto.requerente_nome,
+          sede: projeto.requerente_sede,
+          nif: projeto.requerente_nif || null,
+          responsavel: projeto.requerente_responsavel,
+          telemovel: projeto.requerente_telemovel,
+          email: projeto.requerente_email,
+        })
+        .eq('id', projeto.requerente_id);
+    }
+
+    setSavingBase(false);
+    alert('Bases 01 e 02 atualizadas.');
+  }
+
+  // Atualizar Fase (Base 03)
+  async function updateFase(faseId: string, patch: any) {
+    const atualizada = prazos.map((pr) => {
+      if (pr.id !== faseId) return pr;
+      const merged = { ...pr, ...patch };
+      if ('data_inicio' in patch || 'prazo_contrato_dias' in patch || 'prorrogacao_dias' in patch) {
+        merged.data_fim = calcularDataEntregaFase(
+          merged.data_inicio,
+          null,
+          merged.prazo_contrato_dias,
+          merged.prorrogacao_dias
+        );
+      }
+      return merged;
+    });
+    setPrazos(atualizada);
+    const alvo = atualizada.find((pr) => pr.id === faseId);
+    if (alvo) {
+      await supabase
+        .from('projeto_prazos')
+        .update({
+          data_inicio: alvo.data_inicio || null,
+          data_fim: alvo.data_fim || null,
+          prazo_contrato_dias: alvo.prazo_contrato_dias,
+          prorrogacao_dias: alvo.prorrogacao_dias || 0,
+        })
+        .eq('id', faseId);
+    }
+  }
+
+  // Atualizar Especialidade (Base 04)
+  async function updateEspecialidade(espId: string, patch: any) {
+    setEspecialidades((prev) => prev.map((e) => (e.id === espId ? { ...e, ...patch } : e)));
+    await supabase.from('projeto_especialidades').update(patch).eq('id', espId);
+  }
+
+  // Atualizar Aprovação (Base 05)
+  async function updateAprovacao(aprovId: string, patch: any) {
+    setAprovacoes((prev) => prev.map((a) => (a.id === aprovId ? { ...a, ...patch } : a)));
+    await supabase.from('projeto_aprovacoes').update(patch).eq('id', aprovId);
+  }
+
+  // Comunicações
   async function handleAddRegisto(e: React.FormEvent) {
     e.preventDefault();
     const { error } = await supabase.from('projeto_registos').insert({
@@ -79,54 +178,64 @@ export default function ProjetoDetalhePage() {
   if (!projeto) return <div className="p-6 text-slate-500">A carregar projeto...</div>;
 
   const registosVisiveis = onlyOpen ? registos.filter((r) => !r.data_resolucao) : registos;
+  const espAtivasCount = especialidades.filter((e) => e.aplicavel).length;
+  const aprovAtivasCount = aprovacoes.filter((a) => a.aplicavel).length;
 
   return (
-    <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5">
-      {/* Breadcrumb & Cabeçalho */}
+    <div className="space-y-5">
+      {/* Cabeçalho */}
       <div>
         <Link href="/projetos" className="text-sm text-blue-600 hover:underline">
           ← Voltar aos Projetos
         </Link>
         <div className="mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 text-sm font-bold rounded bg-slate-900 text-white">
                 {projeto.codigo}
               </span>
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900">{projeto.designacao}</h1>
             </div>
             <p className="text-sm text-slate-600 mt-1">
-              {projeto.requerente_nome} • Resp.: {projeto.requerente_responsavel} ({projeto.requerente_email})
+              {projeto.requerente_nome} • Coordenador: <strong>{projeto.coordenador || 'Não definido'}</strong>
             </p>
           </div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-200 gap-4 text-sm font-medium">
+      <div className="flex overflow-x-auto border-b border-slate-200 gap-5 text-sm font-medium">
         <button
           onClick={() => setTab('registos')}
-          className={`pb-2.5 border-b-2 transition ${
+          className={`pb-2.5 border-b-2 whitespace-nowrap transition ${
             tab === 'registos' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500'
           }`}
         >
-          Comunicações & Registos ({registos.length})
+          Comunicações ({registos.length})
         </button>
         <button
-          onClick={() => setTab('capa')}
-          className={`pb-2.5 border-b-2 transition ${
-            tab === 'capa' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500'
+          onClick={() => setTab('bases')}
+          className={`pb-2.5 border-b-2 whitespace-nowrap transition ${
+            tab === 'bases' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500'
           }`}
         >
-          Identificação & Prazos
+          01–03 • Identificação & Fases
         </button>
         <button
-          onClick={() => setTab('especialidades')}
-          className={`pb-2.5 border-b-2 transition ${
-            tab === 'especialidades' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500'
+          onClick={() => setTab('trabalhos')}
+          className={`pb-2.5 border-b-2 whitespace-nowrap transition ${
+            tab === 'trabalhos' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500'
           }`}
         >
-          Especialidades ({especialidades.length})
+          04 • Trabalhos Envolvidos ({espAtivasCount}/{especialidades.length})
+        </button>
+        <button
+          onClick={() => setTab('aprovacoes')}
+          className={`pb-2.5 border-b-2 whitespace-nowrap transition ${
+            tab === 'aprovacoes' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500'
+          }`}
+        >
+          05 • Aprovações ({aprovAtivasCount}/{aprovacoes.length})
         </button>
       </div>
 
@@ -153,19 +262,19 @@ export default function ProjetoDetalhePage() {
           </div>
 
           {newOpen && (
-            <form onSubmit={handleAddRegisto} className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+            <form onSubmit={handleAddRegisto} className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <input
                   placeholder="Ref. (ex: 5.3)"
                   value={form.ref}
                   onChange={(e) => setForm({ ...form, ref: e.target.value })}
-                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300"
                 />
                 <input
                   type="date"
                   value={form.data_registo}
                   onChange={(e) => setForm({ ...form, data_registo: e.target.value })}
-                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300"
                 />
                 <select
                   value={form.tipo_comunicacao}
@@ -181,13 +290,13 @@ export default function ProjetoDetalhePage() {
                   placeholder="De (ex: EP_RM)"
                   value={form.levantado_por}
                   onChange={(e) => setForm({ ...form, levantado_por: e.target.value })}
-                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300"
                 />
                 <input
                   placeholder="Para (ex: DO)"
                   value={form.atribuido_a}
                   onChange={(e) => setForm({ ...form, atribuido_a: e.target.value })}
-                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300"
                 />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -196,13 +305,13 @@ export default function ProjetoDetalhePage() {
                   placeholder="Assunto"
                   value={form.assunto}
                   onChange={(e) => setForm({ ...form, assunto: e.target.value })}
-                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300"
                 />
                 <input
-                  placeholder="Especialidade / Tema (ex: Prazos, Obra Vãos)"
+                  placeholder="Especialidade / Tema"
                   value={form.especialidade}
                   onChange={(e) => setForm({ ...form, especialidade: e.target.value })}
-                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300"
                 />
               </div>
               <textarea
@@ -210,7 +319,7 @@ export default function ProjetoDetalhePage() {
                 placeholder="Corpo da comunicação / Observações..."
                 value={form.resolucao_observacoes}
                 onChange={(e) => setForm({ ...form, resolucao_observacoes: e.target.value })}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
               />
               <button type="submit" className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white">
                 Guardar Registo
@@ -218,7 +327,6 @@ export default function ProjetoDetalhePage() {
             </form>
           )}
 
-          {/* Lista de Comunicações (Timeline Cards) */}
           <div className="space-y-3">
             {registosVisiveis.map((r) => (
               <div key={r.id} className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm space-y-2">
@@ -229,14 +337,10 @@ export default function ProjetoDetalhePage() {
                     </span>
                     <span className="text-xs font-medium text-slate-500">{r.data_registo}</span>
                     {r.tipo_comunicacao && (
-                      <span className="px-2 py-0.5 text-xs rounded bg-blue-50 text-blue-700">
-                        {r.tipo_comunicacao}
-                      </span>
+                      <span className="px-2 py-0.5 text-xs rounded bg-blue-50 text-blue-700">{r.tipo_comunicacao}</span>
                     )}
                     {r.especialidade && (
-                      <span className="px-2 py-0.5 text-xs rounded bg-purple-50 text-purple-700">
-                        {r.especialidade}
-                      </span>
+                      <span className="px-2 py-0.5 text-xs rounded bg-purple-50 text-purple-700">{r.especialidade}</span>
                     )}
                     {(r.levantado_por || r.atribuido_a) && (
                       <span className="text-xs text-slate-600 font-medium">
@@ -270,49 +374,225 @@ export default function ProjetoDetalhePage() {
         </div>
       )}
 
-      {/* TAB 2: CAPA & PRAZOS */}
-      {tab === 'capa' && (
+      {/* TAB 2: BASES 01, 02 & 03 */}
+      {tab === 'bases' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 text-sm">
-              <h2 className="font-bold text-slate-900">Identificação do Requerente</h2>
-              <p><span className="text-slate-500">Nome:</span> {projeto.requerente_nome}</p>
-              <p><span className="text-slate-500">Sede:</span> {projeto.requerente_sede}</p>
-              <p><span className="text-slate-500">NIF:</span> {projeto.requerente_nif}</p>
-              <p><span className="text-slate-500">Responsável:</span> {projeto.requerente_responsavel}</p>
-              <p><span className="text-slate-500">Telemóvel:</span> {projeto.requerente_telemovel}</p>
-              <p><span className="text-slate-500">Email:</span> {projeto.requerente_email}</p>
+          <form onSubmit={handleSaveIdentificacao} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Base 01 */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 text-sm">
+                <h2 className="font-bold text-slate-900">01 • Identificação do Projeto</h2>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Designação</label>
+                  <input
+                    value={projeto.designacao || ''}
+                    onChange={(e) => setProjeto({ ...projeto, designacao: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Coordenador</label>
+                    <input
+                      value={projeto.coordenador || ''}
+                      onChange={(e) => setProjeto({ ...projeto, coordenador: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Data Início</label>
+                    <input
+                      type="date"
+                      value={projeto.data_inicio || ''}
+                      onChange={(e) => setProjeto({ ...projeto, data_inicio: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Morada do Projeto</label>
+                  <input
+                    value={projeto.morada || ''}
+                    onChange={(e) => setProjeto({ ...projeto, morada: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Fase Atual</label>
+                    <select
+                      value={projeto.fase_atual || 'Levantamento'}
+                      onChange={(e) => setProjeto({ ...projeto, fase_atual: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white"
+                    >
+                      {FASES_PADRAO.map((f) => (
+                        <option key={f.nome} value={f.nome}>{f.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Estado</label>
+                    <select
+                      value={projeto.estado || 'Não iniciada'}
+                      onChange={(e) => setProjeto({ ...projeto, estado: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white"
+                    >
+                      {ESTADOS_PROJETO.map((est) => (
+                        <option key={est} value={est}>{est}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Com quem está (seleção múltipla)</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {COM_QUEM_ESTA_OPCOES.map((op) => {
+                      const ativo = (projeto.com_quem_esta || []).includes(op);
+                      return (
+                        <button
+                          key={op}
+                          type="button"
+                          onClick={() => {
+                            const atual = projeto.com_quem_esta || [];
+                            const proximo = ativo ? atual.filter((x: string) => x !== op) : [...atual, op];
+                            setProjeto({ ...projeto, com_quem_esta: proximo });
+                          }}
+                          className={`px-2.5 py-1 text-xs font-medium rounded-lg border ${
+                            ativo ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-300'
+                          }`}
+                        >
+                          {op}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Base 02 */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 text-sm">
+                <h2 className="font-bold text-slate-900">02 • Identificação do Requerente / DO</h2>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Dono de Obra</label>
+                  <input
+                    value={projeto.requerente_nome || ''}
+                    onChange={(e) => setProjeto({ ...projeto, requerente_nome: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Pessoa Responsável</label>
+                    <input
+                      value={projeto.requerente_responsavel || ''}
+                      onChange={(e) => setProjeto({ ...projeto, requerente_responsavel: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">NIF</label>
+                    <input
+                      value={projeto.requerente_nif || ''}
+                      onChange={(e) => setProjeto({ ...projeto, requerente_nif: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Telefone</label>
+                    <input
+                      value={projeto.requerente_telemovel || ''}
+                      onChange={(e) => setProjeto({ ...projeto, requerente_telemovel: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Email</label>
+                    <input
+                      value={projeto.requerente_email || ''}
+                      onChange={(e) => setProjeto({ ...projeto, requerente_email: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Morada / Sede</label>
+                  <input
+                    value={projeto.requerente_sede || ''}
+                    onChange={(e) => setProjeto({ ...projeto, requerente_sede: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 text-sm">
-              <h2 className="font-bold text-slate-900">Identificação do Projeto</h2>
-              <p><span className="text-slate-500">Contrato:</span> {projeto.contrato}</p>
-              <p><span className="text-slate-500">Morada:</span> {projeto.morada}</p>
-              <p><span className="text-slate-500">Nº Processo:</span> {projeto.num_processo || '—'}</p>
-              <p><span className="text-slate-500">Início (Assinatura):</span> {projeto.data_inicio || '—'}</p>
-              <p><span className="text-slate-500">Fim (Aprovação):</span> {projeto.data_fim || '—'}</p>
-            </div>
-          </div>
+            <button
+              type="submit"
+              disabled={savingBase}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800"
+            >
+              {savingBase ? 'A guardar...' : 'Guardar Identificação e Requerente'}
+            </button>
+          </form>
 
+          {/* Base 03: Fases do Projeto */}
           <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+            <div className="px-4 py-3 border-b border-slate-200 font-bold text-sm text-slate-900">
+              03 • Fases do Projeto & Prazos Contratuais (Dias Corridos)
+            </div>
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-slate-600 font-semibold">
                 <tr>
                   <th className="px-4 py-3 text-left">Fase</th>
-                  <th className="px-4 py-3 text-left">Início</th>
-                  <th className="px-4 py-3 text-left">Fim</th>
-                  <th className="px-4 py-3 text-left">Prazo Contrato (dias)</th>
-                  <th className="px-4 py-3 text-left">Prazo Real (dias)</th>
+                  <th className="px-4 py-3 text-left">Prazo Contratual (dias)</th>
+                  <th className="px-4 py-3 text-left">Prorrogação (dias)</th>
+                  <th className="px-4 py-3 text-left">Data de Início</th>
+                  <th className="px-4 py-3 text-left">Data de Fim / Entrega</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {prazos.map((pr) => (
                   <tr key={pr.id}>
                     <td className="px-4 py-3 font-medium text-slate-900">{pr.fase}</td>
-                    <td className="px-4 py-3 text-slate-600">{pr.data_inicio || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{pr.data_fim || '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{pr.prazo_contrato_dias ?? '—'}</td>
-                    <td className="px-4 py-3 text-slate-600">{pr.prazo_real_dias ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        value={pr.prazo_contrato_dias ?? ''}
+                        onChange={(e) =>
+                          updateFase(pr.id, {
+                            prazo_contrato_dias: e.target.value === '' ? null : Number(e.target.value),
+                          })
+                        }
+                        className="w-24 px-2 py-1 rounded border border-slate-300"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        value={pr.prorrogacao_dias ?? 0}
+                        onChange={(e) =>
+                          updateFase(pr.id, { prorrogacao_dias: Number(e.target.value) || 0 })
+                        }
+                        className="w-20 px-2 py-1 rounded border border-slate-300"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="date"
+                        value={pr.data_inicio || ''}
+                        onChange={(e) => updateFase(pr.id, { data_inicio: e.target.value || null })}
+                        className="px-2 py-1 rounded border border-slate-300"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="date"
+                        value={pr.data_fim || ''}
+                        onChange={(e) => updateFase(pr.id, { data_fim: e.target.value || null })}
+                        className="px-2 py-1 rounded border border-slate-300"
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -321,29 +601,139 @@ export default function ProjetoDetalhePage() {
         </div>
       )}
 
-      {/* TAB 3: ESPECIALIDADES */}
-      {tab === 'especialidades' && (
+      {/* TAB 3: BASE 04 - TRABALHOS ENVOLVIDOS */}
+      {tab === 'trabalhos' && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+          <div className="px-4 py-3 border-b border-slate-200 font-bold text-sm text-slate-900">
+            04 • Trabalhos Envolvidos (Marcação das Especialidades Necessárias)
+          </div>
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-slate-600 font-semibold">
               <tr>
+                <th className="px-4 py-3 text-center w-16">Incluir</th>
                 <th className="px-4 py-3 text-left">Especialidade</th>
-                <th className="px-4 py-3 text-left">Técnico Elaborou</th>
-                <th className="px-4 py-3 text-left">Início</th>
-                <th className="px-4 py-3 text-left">Fim</th>
-                <th className="px-4 py-3 text-left">Técnico Responsável</th>
+                <th className="px-4 py-3 text-left">Estado</th>
+                <th className="px-4 py-3 text-left">Técnico / Gabinete</th>
                 <th className="px-4 py-3 text-left">Notas</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {especialidades.map((esp) => (
-                <tr key={esp.id}>
+                <tr key={esp.id} className={esp.aplicavel ? '' : 'bg-slate-50/70 opacity-60'}>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      checked={!!esp.aplicavel}
+                      onChange={(e) => updateEspecialidade(esp.id, { aplicavel: e.target.checked })}
+                      className="w-4 h-4 rounded border-slate-300 text-slate-900"
+                    />
+                  </td>
                   <td className="px-4 py-3 font-medium text-slate-900">{esp.especialidade}</td>
-                  <td className="px-4 py-3 text-slate-600">{esp.tecnico_elaborou || '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{esp.data_inicio || '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{esp.data_fim || '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{esp.tecnico_responsavel || '—'}</td>
-                  <td className="px-4 py-3 text-slate-600">{esp.notas || '—'}</td>
+                  <td className="px-4 py-3">
+                    <select
+                      disabled={!esp.aplicavel}
+                      value={esp.estado || 'Pendente'}
+                      onChange={(e) => updateEspecialidade(esp.id, { estado: e.target.value })}
+                      className="px-2 py-1 text-xs rounded border border-slate-300 bg-white"
+                    >
+                      <option value="Pendente">Pendente</option>
+                      <option value="Em curso">Em curso</option>
+                      <option value="Entregue">Entregue</option>
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      disabled={!esp.aplicavel}
+                      placeholder="Nome técnico..."
+                      value={esp.tecnico_responsavel || ''}
+                      onChange={(e) => updateEspecialidade(esp.id, { tecnico_responsavel: e.target.value })}
+                      className="px-2 py-1 text-xs rounded border border-slate-300 w-40"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      disabled={!esp.aplicavel}
+                      placeholder="Observações..."
+                      value={esp.notas || ''}
+                      onChange={(e) => updateEspecialidade(esp.id, { notas: e.target.value })}
+                      className="px-2 py-1 text-xs rounded border border-slate-300 w-48"
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* TAB 4: BASE 05 - APROVAÇÕES */}
+      {tab === 'aprovacoes' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+          <div className="px-4 py-3 border-b border-slate-200 font-bold text-sm text-slate-900">
+            05 • Aprovações & Entidades Externas
+          </div>
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-slate-600 font-semibold">
+              <tr>
+                <th className="px-4 py-3 text-center w-16">Necessário</th>
+                <th className="px-4 py-3 text-left">Aprovação / Entidade</th>
+                <th className="px-4 py-3 text-left">Estado</th>
+                <th className="px-4 py-3 text-left">Data Submissão</th>
+                <th className="px-4 py-3 text-left">Data Aprovação</th>
+                <th className="px-4 py-3 text-left">Notas</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {aprovacoes.map((ap) => (
+                <tr key={ap.id} className={ap.aplicavel ? '' : 'bg-slate-50/70 opacity-60'}>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      checked={!!ap.aplicavel}
+                      onChange={(e) => updateAprovacao(ap.id, { aplicavel: e.target.checked })}
+                      className="w-4 h-4 rounded border-slate-300 text-slate-900"
+                    />
+                  </td>
+                  <td className="px-4 py-3 font-medium text-slate-900">{ap.nome}</td>
+                  <td className="px-4 py-3">
+                    <select
+                      disabled={!ap.aplicavel}
+                      value={ap.estado || 'Pendente'}
+                      onChange={(e) => updateAprovacao(ap.id, { estado: e.target.value })}
+                      className="px-2 py-1 text-xs rounded border border-slate-300 bg-white"
+                    >
+                      <option value="Pendente">Pendente</option>
+                      <option value="Submetido">Submetido</option>
+                      <option value="Aprovado">Aprovado</option>
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="date"
+                      disabled={!ap.aplicavel}
+                      value={ap.data_submissao || ''}
+                      onChange={(e) => updateAprovacao(ap.id, { data_submissao: e.target.value || null })}
+                      className="px-2 py-1 text-xs rounded border border-slate-300"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="date"
+                      disabled={!ap.aplicavel}
+                      value={ap.data_aprovacao || ''}
+                      onChange={(e) => updateAprovacao(ap.id, { data_aprovacao: e.target.value || null })}
+                      className="px-2 py-1 text-xs rounded border border-slate-300"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      disabled={!ap.aplicavel}
+                      placeholder="Notas..."
+                      value={ap.notas || ''}
+                      onChange={(e) => updateAprovacao(ap.id, { notas: e.target.value })}
+                      className="px-2 py-1 text-xs rounded border border-slate-300 w-44"
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
