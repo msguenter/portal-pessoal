@@ -23,6 +23,14 @@ type Requerente = {
   email: string;
 };
 
+type MembroEquipa = {
+  id: string;
+  nome: string;
+  email: string;
+  papel: 'coordenador' | 'tecnico';
+  ativo: boolean;
+};
+
 type ProjetoRow = {
   id: string;
   codigo: string;
@@ -60,13 +68,24 @@ type ColumnKey = (typeof ALL_COLUMNS)[number]['key'];
 export default function ProjetosPage() {
   const [projetos, setProjetos] = useState<ProjetoRow[]>([]);
   const [requerentes, setRequerentes] = useState<Requerente[]>([]);
+  const [equipa, setEquipa] = useState<MembroEquipa[]>([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
 
-  // Painéis recolhíveis
+  // Painéis recolhíveis e modais
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [newModalOpen, setNewModalOpen] = useState(false);
+  const [equipaModalOpen, setEquipaModalOpen] = useState(false);
+
+  // Estado do disparo manual de emails
+  const [sendingReport, setSendingReport] = useState(false);
+  const [reportLogs, setReportLogs] = useState<string[]>([]);
+  const [novoMembro, setNovoMembro] = useState({
+    nome: '',
+    email: '',
+    papel: 'tecnico' as 'coordenador' | 'tecnico',
+  });
 
   // Filtros
   const [search, setSearch] = useState('');
@@ -122,15 +141,17 @@ export default function ProjetosPage() {
 
   async function fetchAll() {
     setLoading(true);
-    const [{ data: projs }, { data: reqs }] = await Promise.all([
+    const [{ data: projs }, { data: reqs }, { data: eq }] = await Promise.all([
       supabase
         .from('projetos')
         .select('*, projeto_prazos(*), projeto_registos(id, data_resolucao)')
         .order('codigo', { ascending: false }),
       supabase.from('requerentes').select('*').order('nome'),
+      supabase.from('equipa').select('*').order('nome'),
     ]);
 
     if (reqs) setRequerentes(reqs);
+    if (eq) setEquipa(eq);
 
     if (projs) {
       const mapped: ProjetoRow[] = projs.map((p: any) => {
@@ -161,12 +182,61 @@ export default function ProjetosPage() {
     setLoading(false);
   }
 
+  // Gestão de Equipa
+  async function handleAddMembro(e: React.FormEvent) {
+    e.preventDefault();
+    if (!novoMembro.nome.trim() || !novoMembro.email.trim()) return;
+    const { error } = await supabase.from('equipa').insert({
+      nome: novoMembro.nome.trim(),
+      email: novoMembro.email.trim(),
+      papel: novoMembro.papel,
+      ativo: true,
+    });
+    if (error) {
+      alert(`Erro ao adicionar membro: ${error.message}`);
+    } else {
+      setNovoMembro({ nome: '', email: '', papel: 'tecnico' });
+      fetchAll();
+    }
+  }
+
+  async function toggleMembroAtivo(m: MembroEquipa) {
+    await supabase.from('equipa').update({ ativo: !m.ativo }).eq('id', m.id);
+    fetchAll();
+  }
+
+  async function handleDispararEmails(emailUnico?: string) {
+    const msg = emailUnico
+      ? `Enviar relatório de teste agora para ${emailUnico}?`
+      : 'Disparar agora os emails de relatório diário para toda a equipa ativa?';
+    if (!confirm(msg)) return;
+
+    setSendingReport(true);
+    setReportLogs([]);
+    try {
+      const res = await fetch('/api/cron/daily-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailUnico }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Falha no envio.');
+      }
+      setReportLogs(data.detalhes || [`${data.enviados} email(s) enviado(s).`]);
+    } catch (err: any) {
+      alert(`Erro ao disparar emails: ${err.message}`);
+    } finally {
+      setSendingReport(false);
+    }
+  }
+
   // Edição rápida na tabela inicial
   async function updateProjetoInline(id: string, patch: Partial<ProjetoRow>) {
     setProjetos((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
     await supabase.from('projetos').update(patch).eq('id', id);
     if (patch.fase_atual) {
-      await fetchAll(); // Recalcula data de entrega da nova fase
+      await fetchAll();
     }
   }
 
@@ -178,7 +248,7 @@ export default function ProjetosPage() {
     updateProjetoInline(proj.id, { com_quem_esta: proximo });
   }
 
-  // Criar Novo Projeto Manualmente (Bases 01 a 05)
+  // Criar Novo Projeto Manualmente
   async function handleCreateManual(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -241,7 +311,6 @@ export default function ProjetosPage() {
 
       if (projErr || !createdProj) throw projErr;
 
-      // Gerar Bases 03 (Fases), 04 (Especialidades) e 05 (Aprovações)
       await Promise.all([
         supabase.from('projeto_prazos').insert(
           FASES_PADRAO.map((f) => ({
@@ -293,27 +362,24 @@ export default function ProjetosPage() {
       const parsed = await parseProjetoExcel(file);
       if (!parsed.projeto.codigo) throw new Error('Código do projeto não encontrado na célula A6 da aba Capa.');
 
-      // Upsert Requerente na Base 02 se houver nome/NIF
       let reqId: string | null = null;
-      if (parsed.projeto.requerente_nome) {
-        if (parsed.projeto.requerente_nif) {
-          const { data: reqData } = await supabase
-            .from('requerentes')
-            .upsert(
-              {
-                nome: parsed.projeto.requerente_nome,
-                sede: parsed.projeto.requerente_sede,
-                nif: parsed.projeto.requerente_nif,
-                responsavel: parsed.projeto.requerente_responsavel,
-                telemovel: parsed.projeto.requerente_telemovel,
-                email: parsed.projeto.requerente_email,
-              },
-              { onConflict: 'nif' }
-            )
-            .select('id')
-            .single();
-          reqId = reqData?.id || null;
-        }
+      if (parsed.projeto.requerente_nome && parsed.projeto.requerente_nif) {
+        const { data: reqData } = await supabase
+          .from('requerentes')
+          .upsert(
+            {
+              nome: parsed.projeto.requerente_nome,
+              sede: parsed.projeto.requerente_sede,
+              nif: parsed.projeto.requerente_nif,
+              responsavel: parsed.projeto.requerente_responsavel,
+              telemovel: parsed.projeto.requerente_telemovel,
+              email: parsed.projeto.requerente_email,
+            },
+            { onConflict: 'nif' }
+          )
+          .select('id')
+          .single();
+        reqId = reqData?.id || null;
       }
 
       const { data: projData, error: projErr } = await supabase
@@ -337,7 +403,6 @@ export default function ProjetosPage() {
         supabase.from('projeto_registos').delete().eq('projeto_id', projetoId),
       ]);
 
-      // Só insere aprovações padrão se ainda não existirem para este projeto
       const { count: aprovCount } = await supabase
         .from('projeto_aprovacoes')
         .select('*', { count: 'exact', head: true })
@@ -373,8 +438,11 @@ export default function ProjetosPage() {
   }
 
   const coordenadoresUnicos = useMemo(
-    () => Array.from(new Set(projetos.map((p) => p.coordenador).filter(Boolean))),
-    [projetos]
+    () =>
+      Array.from(
+        new Set([...equipa.map((m) => m.nome), ...projetos.map((p) => p.coordenador)].filter(Boolean))
+      ),
+    [projetos, equipa]
   );
 
   const filteredProjetos = useMemo(() => {
@@ -459,6 +527,17 @@ export default function ProjetosPage() {
           >
             <span>Colunas</span>
             <span className="text-xs">{columnsOpen ? '▲' : '▼'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setReportLogs([]);
+              setEquipaModalOpen(true);
+            }}
+            className="px-3 py-2 text-sm font-medium rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-800"
+          >
+            Equipa & Emails
           </button>
 
           <button
@@ -574,6 +653,142 @@ export default function ProjetosPage() {
         </div>
       )}
 
+      {/* Modal: Equipa & Disparo de Relatórios por Email */}
+      {equipaModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-xl my-8">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Equipa ARCOS & Relatórios por Email</h2>
+                <p className="text-xs text-slate-500">
+                  Envio automático de Seg a Sex às 09h00 + disparo manual imediato
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEquipaModalOpen(false)}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Disparo Manual Fora do Agendamento */}
+            <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <div className="font-semibold text-sm text-slate-900">Disparo Manual Imediato</div>
+                <div className="text-xs text-slate-600">
+                  Envia agora o relatório de pendências para cada técnico ativo e o consolidado para o(s) coordenador(es).
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={sendingReport}
+                onClick={() => handleDispararEmails()}
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap disabled:opacity-50"
+              >
+                {sendingReport ? 'A enviar...' : 'Disparar Emails Agora'}
+              </button>
+            </div>
+
+            {reportLogs.length > 0 && (
+              <div className="p-3 rounded-lg bg-slate-900 text-slate-100 text-xs space-y-1 font-mono">
+                {reportLogs.map((l, idx) => (
+                  <div key={idx}>• {l}</div>
+                ))}
+              </div>
+            )}
+
+            {/* Formulário Novo Membro */}
+            <form onSubmit={handleAddMembro} className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+              <input
+                required
+                placeholder="Nome (ex: Roberta Marquardt)"
+                value={novoMembro.nome}
+                onChange={(e) => setNovoMembro({ ...novoMembro, nome: e.target.value })}
+                className="px-3 py-2 text-sm rounded-lg border border-slate-300"
+              />
+              <input
+                required
+                type="email"
+                placeholder="Email"
+                value={novoMembro.email}
+                onChange={(e) => setNovoMembro({ ...novoMembro, email: e.target.value })}
+                className="px-3 py-2 text-sm rounded-lg border border-slate-300"
+              />
+              <select
+                value={novoMembro.papel}
+                onChange={(e) => setNovoMembro({ ...novoMembro, papel: e.target.value as any })}
+                className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="tecnico">Técnico</option>
+                <option value="coordenador">Coordenador (Recebe tudo)</option>
+              </select>
+              <button type="submit" className="px-3 py-2 text-sm font-medium rounded-lg bg-slate-900 text-white">
+                + Adicionar
+              </button>
+            </form>
+
+            {/* Lista da Equipa */}
+            <div className="border rounded-xl overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-slate-600 font-semibold">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Nome</th>
+                    <th className="px-3 py-2 text-left">Email</th>
+                    <th className="px-3 py-2 text-left">Papel</th>
+                    <th className="px-3 py-2 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {equipa.map((m) => (
+                    <tr key={m.id} className={m.ativo ? '' : 'opacity-50'}>
+                      <td className="px-3 py-2 font-medium text-slate-900">{m.nome}</td>
+                      <td className="px-3 py-2 text-slate-600">{m.email}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                            m.papel === 'coordenador'
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {m.papel === 'coordenador' ? 'Coordenador' : 'Técnico'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right space-x-2 whitespace-nowrap">
+                        <button
+                          type="button"
+                          disabled={sendingReport}
+                          onClick={() => handleDispararEmails(m.email)}
+                          className="text-xs text-blue-600 hover:underline"
+                        >
+                          Testar envio
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleMembroAtivo(m)}
+                          className="text-xs text-slate-500 hover:underline"
+                        >
+                          {m.ativo ? 'Desativar' : 'Ativar'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {equipa.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-6 text-center text-slate-400">
+                        Nenhum membro cadastrado ainda.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal: Novo Projeto Manual */}
       {newModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
@@ -601,12 +816,16 @@ export default function ProjetosPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Coordenador</label>
-                <input
-                  placeholder="ex: Roberta Marquardt"
+                <select
                   value={novoProj.coordenador}
                   onChange={(e) => setNovoProj({ ...novoProj, coordenador: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
-                />
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                >
+                  <option value="">Selecionar...</option>
+                  {equipa.filter((m) => m.ativo).map((m) => (
+                    <option key={m.id} value={m.nome}>{m.nome}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Data de Início</label>
@@ -640,7 +859,6 @@ export default function ProjetosPage() {
               />
             </div>
 
-            {/* Base 02: Seleção ou criação de Requerente */}
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
               <div className="text-xs font-bold text-slate-700 uppercase">Base 02 • Requerente / Dono de Obra</div>
               <select
@@ -659,7 +877,7 @@ export default function ProjetosPage() {
               {novoProj.requerente_id === 'NOVO' && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <input
-                    placeholder="Nome do Dono de Obra (ex: Município de...)"
+                    placeholder="Nome do Dono de Obra"
                     value={novoProj.req_nome}
                     onChange={(e) => setNovoProj({ ...novoProj, req_nome: e.target.value })}
                     className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 bg-white"
@@ -757,8 +975,17 @@ export default function ProjetosPage() {
                     </td>
                   )}
                   {visibleCols.coordenador && (
-                    <td className="px-3.5 py-3 text-slate-700 whitespace-nowrap">
-                      {p.coordenador || <span className="text-slate-400 italic">Definir</span>}
+                    <td className="px-3.5 py-3 whitespace-nowrap">
+                      <select
+                        value={p.coordenador || ''}
+                        onChange={(e) => updateProjetoInline(p.id, { coordenador: e.target.value })}
+                        className="px-2 py-1 text-xs rounded-md border border-slate-200 bg-white text-slate-700"
+                      >
+                        <option value="">Definir...</option>
+                        {coordenadoresUnicos.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
                     </td>
                   )}
                   {visibleCols.fase_atual && (

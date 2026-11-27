@@ -1,0 +1,16 @@
+name: Relatorio Diario Projetos ARCOS
+
+on:
+  schedule:
+    # 09:00 UTC (hora de Lisboa no inverno; no verão UTC+1 executa às 10:00 locais)
+    - cron: '0 9 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar endpoint de relatorio diario
+        run: |
+          curl -f -X GET "${{ secrets.PORTAL_APP_URL }}/api/cron/daily-report" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

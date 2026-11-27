@@ -19,6 +19,7 @@ export default function ProjetoDetalhePage() {
   const [especialidades, setEspecialidades] = useState<any[]>([]);
   const [aprovacoes, setAprovacoes] = useState<any[]>([]);
   const [registos, setRegistos] = useState<any[]>([]);
+  const [equipa, setEquipa] = useState<any[]>([]);
   const [tab, setTab] = useState<'registos' | 'bases' | 'trabalhos' | 'aprovacoes'>('registos');
 
   const [onlyOpen, setOnlyOpen] = useState(false);
@@ -33,6 +34,7 @@ export default function ProjetoDetalhePage() {
     tipo_comunicacao: 'Email',
     assunto: '',
     atribuido_a: 'DO',
+    responsavel_equipa: '',
     resolucao_observacoes: '',
   });
 
@@ -41,13 +43,15 @@ export default function ProjetoDetalhePage() {
   }, [id]);
 
   async function loadAll() {
-    const [{ data: p }, { data: pr }, { data: esp }, { data: aprov }, { data: reg }] = await Promise.all([
-      supabase.from('projetos').select('*').eq('id', id).single(),
-      supabase.from('projeto_prazos').select('*').eq('projeto_id', id).order('ordem'),
-      supabase.from('projeto_especialidades').select('*').eq('projeto_id', id).order('ordem'),
-      supabase.from('projeto_aprovacoes').select('*').eq('projeto_id', id).order('ordem'),
-      supabase.from('projeto_registos').select('*').eq('projeto_id', id).order('data_registo', { ascending: false }),
-    ]);
+    const [{ data: p }, { data: pr }, { data: esp }, { data: aprov }, { data: reg }, { data: eq }] =
+      await Promise.all([
+        supabase.from('projetos').select('*').eq('id', id).single(),
+        supabase.from('projeto_prazos').select('*').eq('projeto_id', id).order('ordem'),
+        supabase.from('projeto_especialidades').select('*').eq('projeto_id', id).order('ordem'),
+        supabase.from('projeto_aprovacoes').select('*').eq('projeto_id', id).order('ordem'),
+        supabase.from('projeto_registos').select('*').eq('projeto_id', id).order('data_registo', { ascending: false }),
+        supabase.from('equipa').select('*').eq('ativo', true).order('nome'),
+      ]);
 
     if (p) {
       setProjeto({
@@ -59,9 +63,9 @@ export default function ProjetoDetalhePage() {
     setEspecialidades(esp || []);
     setAprovacoes(aprov || []);
     setRegistos(reg || []);
+    setEquipa(eq || []);
   }
 
-  // Guardar alterações das Bases 01 e 02
   async function handleSaveIdentificacao(e: React.FormEvent) {
     e.preventDefault();
     setSavingBase(true);
@@ -104,7 +108,6 @@ export default function ProjetoDetalhePage() {
     alert('Bases 01 e 02 atualizadas.');
   }
 
-  // Atualizar Fase (Base 03)
   async function updateFase(faseId: string, patch: any) {
     const atualizada = prazos.map((pr) => {
       if (pr.id !== faseId) return pr;
@@ -134,19 +137,16 @@ export default function ProjetoDetalhePage() {
     }
   }
 
-  // Atualizar Especialidade (Base 04)
   async function updateEspecialidade(espId: string, patch: any) {
     setEspecialidades((prev) => prev.map((e) => (e.id === espId ? { ...e, ...patch } : e)));
     await supabase.from('projeto_especialidades').update(patch).eq('id', espId);
   }
 
-  // Atualizar Aprovação (Base 05)
   async function updateAprovacao(aprovId: string, patch: any) {
     setAprovacoes((prev) => prev.map((a) => (a.id === aprovId ? { ...a, ...patch } : a)));
     await supabase.from('projeto_aprovacoes').update(patch).eq('id', aprovId);
   }
 
-  // Comunicações
   async function handleAddRegisto(e: React.FormEvent) {
     e.preventDefault();
     const { error } = await supabase.from('projeto_registos').insert({
@@ -163,10 +163,16 @@ export default function ProjetoDetalhePage() {
         tipo_comunicacao: 'Email',
         assunto: '',
         atribuido_a: 'DO',
+        responsavel_equipa: '',
         resolucao_observacoes: '',
       });
       loadAll();
     }
+  }
+
+  async function updateRegistoResponsavel(regId: string, responsavel_equipa: string) {
+    setRegistos((prev) => prev.map((r) => (r.id === regId ? { ...r, responsavel_equipa } : r)));
+    await supabase.from('projeto_registos').update({ responsavel_equipa }).eq('id', regId);
   }
 
   async function toggleResolver(reg: any) {
@@ -263,7 +269,7 @@ export default function ProjetoDetalhePage() {
 
           {newOpen && (
             <form onSubmit={handleAddRegisto} className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
                 <input
                   placeholder="Ref. (ex: 5.3)"
                   value={form.ref}
@@ -298,6 +304,16 @@ export default function ProjetoDetalhePage() {
                   onChange={(e) => setForm({ ...form, atribuido_a: e.target.value })}
                   className="px-3 py-2 text-sm rounded-lg border border-slate-300"
                 />
+                <select
+                  value={form.responsavel_equipa}
+                  onChange={(e) => setForm({ ...form, responsavel_equipa: e.target.value })}
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                >
+                  <option value="">Responsável Equipa...</option>
+                  {equipa.map((m) => (
+                    <option key={m.id} value={m.nome}>{m.nome}</option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input
@@ -349,16 +365,30 @@ export default function ProjetoDetalhePage() {
                     )}
                   </div>
 
-                  <button
-                    onClick={() => toggleResolver(r)}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-full border transition ${
-                      r.data_resolucao
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                        : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
-                    }`}
-                  >
-                    {r.data_resolucao ? `Resolvido (${r.data_resolucao})` : 'Pendente • Marcar resolvido'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={r.responsavel_equipa || ''}
+                      onChange={(e) => updateRegistoResponsavel(r.id, e.target.value)}
+                      className="px-2 py-1 text-xs rounded-md border border-slate-200 bg-slate-50 text-slate-700"
+                      title="Atribuir a membro da equipa para alerta diário"
+                    >
+                      <option value="">Atribuir equipa...</option>
+                      {equipa.map((m) => (
+                        <option key={m.id} value={m.nome}>{m.nome}</option>
+                      ))}
+                    </select>
+
+                    <button
+                      onClick={() => toggleResolver(r)}
+                      className={`px-2.5 py-1 text-xs font-medium rounded-full border transition ${
+                        r.data_resolucao
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+                      }`}
+                    >
+                      {r.data_resolucao ? `Resolvido (${r.data_resolucao})` : 'Pendente • Marcar resolvido'}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="font-semibold text-slate-900">{r.assunto || '(Sem assunto)'}</div>
@@ -393,11 +423,16 @@ export default function ProjetoDetalhePage() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Coordenador</label>
-                    <input
+                    <select
                       value={projeto.coordenador || ''}
                       onChange={(e) => setProjeto({ ...projeto, coordenador: e.target.value })}
-                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300"
-                    />
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white"
+                    >
+                      <option value="">Selecionar...</option>
+                      {equipa.map((m) => (
+                        <option key={m.id} value={m.nome}>{m.nome}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Data Início</label>
@@ -613,7 +648,8 @@ export default function ProjetoDetalhePage() {
                 <th className="px-4 py-3 text-center w-16">Incluir</th>
                 <th className="px-4 py-3 text-left">Especialidade</th>
                 <th className="px-4 py-3 text-left">Estado</th>
-                <th className="px-4 py-3 text-left">Técnico / Gabinete</th>
+                <th className="px-4 py-3 text-left">Responsável Equipa</th>
+                <th className="px-4 py-3 text-left">Prazo Específico</th>
                 <th className="px-4 py-3 text-left">Notas</th>
               </tr>
             </thead>
@@ -642,12 +678,25 @@ export default function ProjetoDetalhePage() {
                     </select>
                   </td>
                   <td className="px-4 py-3">
-                    <input
+                    <select
                       disabled={!esp.aplicavel}
-                      placeholder="Nome técnico..."
                       value={esp.tecnico_responsavel || ''}
                       onChange={(e) => updateEspecialidade(esp.id, { tecnico_responsavel: e.target.value })}
-                      className="px-2 py-1 text-xs rounded border border-slate-300 w-40"
+                      className="px-2 py-1 text-xs rounded border border-slate-300 bg-white w-44"
+                    >
+                      <option value="">Selecionar...</option>
+                      {equipa.map((m) => (
+                        <option key={m.id} value={m.nome}>{m.nome}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="date"
+                      disabled={!esp.aplicavel}
+                      value={esp.data_fim || ''}
+                      onChange={(e) => updateEspecialidade(esp.id, { data_fim: e.target.value || null })}
+                      className="px-2 py-1 text-xs rounded border border-slate-300"
                     />
                   </td>
                   <td className="px-4 py-3">
@@ -656,7 +705,7 @@ export default function ProjetoDetalhePage() {
                       placeholder="Observações..."
                       value={esp.notas || ''}
                       onChange={(e) => updateEspecialidade(esp.id, { notas: e.target.value })}
-                      className="px-2 py-1 text-xs rounded border border-slate-300 w-48"
+                      className="px-2 py-1 text-xs rounded border border-slate-300 w-44"
                     />
                   </td>
                 </tr>
