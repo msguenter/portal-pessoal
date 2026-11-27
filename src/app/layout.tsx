@@ -6,6 +6,7 @@ import {
   HeartPulse,
   Hammer,
   TrendingUp,
+  FolderKanban,
   Target,
 } from "lucide-react";
 import "./globals.css";
@@ -17,7 +18,7 @@ const isPreview =
 
 export const metadata: Metadata = {
   title: isPreview ? "[DEV] Portal Pessoal" : "Portal Pessoal",
-  description: "Gestão pessoal de saúde, obra, investimentos, finanças e planos",
+  description: "Gestão pessoal de saúde, obra, investimentos, projetos, finanças e planos",
 };
 
 export const viewport: Viewport = {
@@ -31,6 +32,7 @@ const navItems = [
   { href: "/saude", label: "Saúde", icon: HeartPulse },
   { href: "/obra", label: "Obra", icon: Hammer },
   { href: "/investimentos-br", label: "Invest. BR", icon: TrendingUp },
+  { href: "/projetos", label: "Projetos", icon: FolderKanban },
   { href: "/financas", label: "Finanças", icon: Wallet },
   { href: "/planos", label: "Planos", icon: Target },
 ];
@@ -83,11 +85,11 @@ export default function RootLayout({
 
             {isPreview ? (
               <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500 text-white tracking-wide">
-                DEV • v0.4
+                DEV • v0.5
               </span>
             ) : (
               <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
-                v0.4
+                v0.5
               </span>
             )}
           </div>
@@ -96,7 +98,7 @@ export default function RootLayout({
         <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
 
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 px-1 py-1.5 shadow-lg">
-          <div className="grid grid-cols-6 gap-0.5">
+          <div className="grid grid-cols-7 gap-0.5">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (

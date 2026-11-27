@@ -3,6 +3,7 @@ import {
   HeartPulse,
   Hammer,
   TrendingUp,
+  FolderKanban,
   Wallet,
   Target,
   ChevronRight,
@@ -31,6 +32,14 @@ const modulos = [
     descricao: "Carteira ativa, patrimônio líquido e cotas de terceiros",
     icon: TrendingUp,
     cor: "bg-emerald-50 text-emerald-600 border-emerald-100",
+    ativo: true,
+  },
+  {
+    href: "/projetos",
+    titulo: "Projetos",
+    descricao: "Coordenação, prazos, especialidades e registos de projeto",
+    icon: FolderKanban,
+    cor: "bg-blue-50 text-blue-600 border-blue-100",
     ativo: true,
   },
   {
