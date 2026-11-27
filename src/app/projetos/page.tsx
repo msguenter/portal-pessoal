@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { parseProjetoExcel } from '@/lib/projetos/parseExcel';
+import ProjetosCharts from '@/components/projetos/ProjetosCharts';
 import {
   APROVACOES_PADRAO,
   COM_QUEM_ESTA_OPCOES,
@@ -48,6 +49,7 @@ type ProjetoRow = {
   entrega_fase_atual?: string | null;
   registos_count?: number;
   pendentes_count?: number;
+  projeto_especialidades?: any[];
 };
 
 const ALL_COLUMNS = [
@@ -73,6 +75,7 @@ export default function ProjetosPage() {
   const [importing, setImporting] = useState(false);
 
   // Painéis recolhíveis e modais
+  const [chartsOpen, setChartsOpen] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [newModalOpen, setNewModalOpen] = useState(false);
@@ -144,7 +147,7 @@ export default function ProjetosPage() {
     const [{ data: projs }, { data: reqs }, { data: eq }] = await Promise.all([
       supabase
         .from('projetos')
-        .select('*, projeto_prazos(*), projeto_registos(id, data_resolucao)')
+        .select('*, projeto_prazos(*), projeto_especialidades(*), projeto_registos(id, data_resolucao)')
         .order('codigo', { ascending: false }),
       supabase.from('requerentes').select('*').order('nome'),
       supabase.from('equipa').select('*').order('nome'),
@@ -499,13 +502,22 @@ export default function ProjetosPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Projetos ARCOS</h1>
           <p className="text-sm text-slate-500">Resumo de coordenação, prazos, responsabilidades e comunicações</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setChartsOpen((v) => !v)}
+            className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5"
+          >
+            <span>Gráficos</span>
+            <span className="text-xs">{chartsOpen ? '▲' : '▼'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setFiltersOpen((v) => !v)}
@@ -561,9 +573,14 @@ export default function ProjetosPage() {
         </div>
       </div>
 
+      {/* Painel Recolhível: Gráficos & KPIs */}
+      {chartsOpen && !loading && (
+        <ProjetosCharts projetos={projetos} equipa={equipa} />
+      )}
+
       {/* Painel Recolhível: Filtros */}
       {filtersOpen && (
-        <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm grid grid-cols-5 gap-3">
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Pesquisar</label>
             <input
@@ -637,7 +654,7 @@ export default function ProjetosPage() {
       {columnsOpen && (
         <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="text-xs font-semibold text-slate-600 mb-2">Colunas visíveis na tabela:</div>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-4">
             {ALL_COLUMNS.map((col) => (
               <label key={col.key} className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                 <input
@@ -673,8 +690,7 @@ export default function ProjetosPage() {
               </button>
             </div>
 
-            {/* Disparo Manual Fora do Agendamento */}
-            <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200 flex items-center justify-between gap-3">
               <div>
                 <div className="font-semibold text-sm text-slate-900">Disparo Manual Imediato</div>
                 <div className="text-xs text-slate-600">
@@ -699,8 +715,7 @@ export default function ProjetosPage() {
               </div>
             )}
 
-            {/* Formulário Novo Membro */}
-            <form onSubmit={handleAddMembro} className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+            <form onSubmit={handleAddMembro} className="grid grid-cols-4 gap-2">
               <input
                 required
                 placeholder="Nome (ex: Roberta Marquardt)"
@@ -729,7 +744,6 @@ export default function ProjetosPage() {
               </button>
             </form>
 
-            {/* Lista da Equipa */}
             <div className="border rounded-xl overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-slate-600 font-semibold">
@@ -803,7 +817,7 @@ export default function ProjetosPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Código *</label>
                 <input
@@ -875,7 +889,7 @@ export default function ProjetosPage() {
               </select>
 
               {novoProj.requerente_id === 'NOVO' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-2 gap-2.5">
                   <input
                     placeholder="Nome do Dono de Obra"
                     value={novoProj.req_nome}
