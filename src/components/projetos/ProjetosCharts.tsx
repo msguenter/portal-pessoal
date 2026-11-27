@@ -19,7 +19,6 @@ interface ProjetosChartsProps {
 }
 
 export default function ProjetosCharts({ projetos, equipa }: ProjetosChartsProps) {
-  // KPIs rápidos
   const kpis = useMemo(() => {
     const ativos = projetos.filter((p) => p.estado !== 'Concluído');
     const aguardaDO = ativos.filter((p) => p.estado === 'Aguarda resposta DO').length;
@@ -56,18 +55,16 @@ export default function ProjetosCharts({ projetos, equipa }: ProjetosChartsProps
     });
   }, [projetos]);
 
-  // Gráfico 2: Projetos por Fase Atual
+  // Gráfico 2: Projetos por Fase Atual (barras horizontais com nome completo legível)
   const dataFases = useMemo(() => {
     const ativos = projetos.filter((p) => p.estado !== 'Concluído');
     return FASES_PADRAO.map((f) => ({
-      fase: f.nome
-        .replace('Projeto de Execução', 'Execução')
-        .replace('Assistência Técnica', 'Assist. Téc.'),
+      fase: f.nome,
       projetos: ativos.filter((p) => p.fase_atual === f.nome).length,
     }));
   }, [projetos]);
 
-  // Gráfico 3: Carga por Membro da Equipa (Coordenação + Especialidades ativas)
+  // Gráfico 3: Carga por Membro da Equipa
   const dataEquipa = useMemo(() => {
     const ativos = projetos.filter((p) => p.estado !== 'Concluído');
     const nomes = Array.from(
@@ -92,7 +89,7 @@ export default function ProjetosCharts({ projetos, equipa }: ProjetosChartsProps
       });
 
       return {
-        nome: nome.split(' ')[0], // Primeiro nome para eixo limpo
+        nome: nome.split(' ')[0],
         nomeCompleto: nome,
         Coordenação: coordCount,
         'Esp. Em Curso': espEmCurso,
@@ -144,17 +141,17 @@ export default function ProjetosCharts({ projetos, equipa }: ProjetosChartsProps
           </div>
         </div>
 
-        {/* Gráfico 2: Projetos por Fase */}
+        {/* Gráfico 2: Projetos por Fase (Horizontal) */}
         <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
           <h3 className="text-sm font-bold text-slate-800 mb-3">Carteira por Fase Atual</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dataFases} margin={{ left: -15, right: 10 }}>
+              <BarChart data={dataFases} layout="vertical" margin={{ left: 10, right: 15 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="fase" tick={{ fontSize: 11 }} interval={0} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                <YAxis dataKey="fase" type="category" width={135} tick={{ fontSize: 12 }} />
                 <Tooltip />
-                <Bar dataKey="projetos" name="Projetos" fill="#0f172a" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="projetos" name="Projetos" fill="#0f172a" radius={[0, 6, 6, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

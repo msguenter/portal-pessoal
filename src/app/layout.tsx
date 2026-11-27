@@ -52,7 +52,7 @@ export default function RootLayout({
               : "bg-white/90 border-slate-200"
           }`}
         >
-          <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
             <Link
               href="/"
               className="flex items-center gap-2 font-bold text-slate-900 text-lg tracking-tight"
@@ -95,7 +95,7 @@ export default function RootLayout({
           </div>
         </header>
 
-        <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
+        <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>
 
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 px-1 py-1.5 shadow-lg">
           <div className="grid grid-cols-7 gap-0.5">
